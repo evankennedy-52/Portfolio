@@ -4,4 +4,4 @@ Contained in this folder is the final product, a formal poster created and used 
 
 All work of data collection, analysis, and presentation for this project was completed exclusively by myself.
 
-_Project Data of Completion: 2022_
+_Project Data of Completion: May 2022_
