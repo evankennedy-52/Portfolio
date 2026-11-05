@@ -3,6 +3,8 @@ A data-driven analysis of the impact sustainable growing practices have on corn 
 
 **Author:** Evan Kennedy
 
+---
+
 ## Project Overview
 
 This project investigates the relationship between sustainable agricultural practices and corn yields using historical data from a controlled agricultural field study conducted in Iowa between 2008 and 2020.
