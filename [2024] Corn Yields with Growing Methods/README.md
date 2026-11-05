@@ -1,4 +1,7 @@
 # Corn Yields and Sustainable Growing Methods
+A data-driven analysis of the impact sustainable growing practices have on corn yields, structured within the notebook as a tutorial both for readability and reproducibility.
+
+**Author:** Evan Kennedy
 
 ## Project Overview
 
@@ -118,7 +121,3 @@ Future work could incorporate additional environmental and agricultural datasets
 The project notebook contains the complete workflow, including data collection, preprocessing, exploratory analysis, feature engineering, regression modeling, and evaluation.
 
 The three original CSV datasets are required to execute the notebook.
-
-## Author
-
-**Evan Kennedy**
