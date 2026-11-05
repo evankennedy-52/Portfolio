@@ -3,7 +3,6 @@
 A guided, data-driven tutorial on building a simple corn yield prediction tool that small farms can use to evaluate growing plans, without paying for precision-agriculture consulting.
 
 **Author:** Evan Kennedy
-**Program:** University of Maryland, College Park, Applied Machine Learning Master's Program
 
 ---
 
@@ -131,20 +130,6 @@ Then run the cells in order. Make sure the data file is in place first (see abov
 - Yield is also driven by unpredictable events (drought, heat waves, cold shocks, pest outbreaks) that are not in the model.
 - A linear model is simple and cheap to train, but more complex methods can often predict better given more data (e.g., topographical data).
 - Some features were dropped because they weren't recorded for every treatment group. The notebook includes a commented-out list of additional outputs (e.g., dry matter, kernel counts) that could be modeled with more complete data.
-
----
-
-## Further Reading
-
-**Agricultural inputs**
-- [The Basics of Chemical Fertilizers](https://extension.msstate.edu/publications/inorganic-fertilizers-for-crop-production)
-- [Soil Characteristics and Fertilizer Absorption](https://www.sound.ag/blog/plant-uptake-nutrient-absorption-2-2)
-- [Irrigation Effects on Yields](https://www.nature.com/articles/s41598-021-01433-w)
-
-**Data science**
-- [The Data Science Pipeline](https://www.domo.com/glossary/what-is-the-data-science-pipeline)
-- [Model Selection](https://towardsdatascience.com/a-short-introduction-to-model-selection-bb1bb9c73376)
-- [More Project Ideas](https://builtin.com/data-science/data-science-projects)
 
 ---
 
