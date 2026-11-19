@@ -1,0 +1,624 @@
+---
+title: "Corn Yields and Sustainable Growing Methods"
+author: "Evan Kennedy"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+#Library imports used in this analysis
+library(tidyverse)
+```
+
+```{r}
+library(modelr)
+```
+
+## Objective
+
+The objective of this analysis is to investigate how sustainable
+practices in agriculture (no-till, crop rotations, etc.) impact yields
+for one of the world’s staple crops, corn, to try and establish a more
+definite answer for how much farmers should worry over yield losses when
+considering adoption of these sustainable practices. We will do this by
+modeling corn yield data with growing practices as factors, to determine
+the relationship between yields and practice.
+
+## Hypothesis
+
+Hypothesis: Growing practices related to sustainability have little
+effect on corn yields.
+
+## Data Collection
+
+Considering data to use for this project, while the initial instinct may
+be to use a large sample of yield data from actual farms and compare
+their practices, such a dataset is very difficult to find, as farms,
+like any other business, prefer to keep the finer details of their
+practices and productivity private. Thus we will settle for the next
+best thing; study data intentionally giving corn fields different
+treatments of growing practices.
+
+Data is from a National Laboratory for Agriculture and Environment study
+analyzing individual controlled corn growing plots via the Iowa State
+University from 2007-2021, using different combinations of tilling
+methods, crop rotations, growing methods, and silage treatments.
+
+Link to the data:
+<https://catalog.data.gov/dataset/thirteen-year-stover-harvest-and-tillage-effects-on-corn-agroecosystem-sustainability-in-i-be5ae>
+
+The files from the study used in this project are ‘Field 70-71
+CornYield_2008-2021_ForR_0.csv’ for field treatment and yields data,
+‘PRISM_MayTemps.csv’ for annual season temperature data, and
+‘Rainfall_AEA.csv’ for daily rainfall data.
+
+## Data Processing
+
+Before we can begin graphing and modelling our data to find trends, we
+need to change it to a more usable form. In this case, that means
+streamlining our columns down to easily referenced variables, and
+separating our data by year in addition to plot number, to make distinct
+rows of feature values that we can easily reference later.
+
+### Importing the data
+
+Creating a separate tibble for each dataset
+
+```{r}
+field_data = read_csv(file.path("Field 70-71 CornYield_2008-2021_ForR_0.csv"), show_col_types = FALSE)
+temp_data = read_csv(file.path("PRISM_MayTemps.csv"), show_col_types = FALSE)
+rain_data = read_csv(file.path("Rainfall_AEA.csv"), show_col_types = FALSE)
+```
+
+### Rainfall Data
+
+Looking at the data we have, the rainfall data is daily rainfall, but
+all our other data is yearly. To fix that we’ll be combining the
+rainfall data from April-October for 2008-2020 into season totals, to
+align with the yields data we have.
+
+It is worth noting that corn is often planted in mid or late April (if
+not in early May) and harvested in early or mid October, so including
+all the rainfall data from those months could be excessive. However, we
+do not have information from our dataset on the exact date that any
+plots were planted or harvested, so we include the entire month’s data
+to be thorough.
+
+To do this we will be creating a new tibble for seasonal rain data,
+which will have Year and Rainfall columns, with each year’s rainfall
+being the total rainfall recorded during the growing season
+(April-October) for that year.
+
+```{r}
+#Making new seasonal rainfall tibble
+seasonal_rain_data = rain_data %>% 
+  #Filtering for data usable w/ our crop data, so year within 2008-2020, month within April-October
+  filter(Year >= 2008 & Year <= 2020 & Month >= 4 & Month <= 10) %>%
+  #Aggregating yearly totals
+  group_by(Year) %>% summarize(Rainfall = sum(mm))
+```
+
+### Field Data
+
+Now we need to process the plot management and yields data. For basic
+processing of this data we will:
+
+To separate biochar into its own column, we will be adding a biochar
+column w/ value 4 or 13 based on the values in the EndingCropRotation
+column, specifically sub-stringing it for “4” and “13” because there
+were only two specific levels of biochar application done for this
+study.
+
+```{r}
+#Adding biochar column w/ values based on EndingCropRotation column
+field_data = field_data %>%
+  mutate(
+    Biochar = if_else(
+      grepl("4", EndingCropRotation),
+      4,
+      if_else(
+        grepl("13", EndingCropRotation),
+        13,
+        0
+      )
+    )
+  )
+```
+
+To adjust the InitialCroppingSystem strings we will again just be using
+a sub-string approach, matching to “continuous” for continuous, “twin”
+for twin-row and “cover” for cover crops (perennial and annual)
+
+Important: Checking against the lowercase version of
+InitialCroppingSystem
+
+```{r}
+#Simplifying InitialCroppingSystem values
+field_data = field_data %>% 
+  mutate(
+    InitialCroppingSystem = if_else(
+      grepl("continuous", tolower(InitialCroppingSystem)),
+      "Continuous",
+      if_else(
+        grepl("twin", tolower(InitialCroppingSystem)),
+        "Twin",
+        if_else(
+          grepl("cover", tolower(InitialCroppingSystem)),
+          "Cover",
+          ""
+        )
+      )
+    )
+  )
+```
+
+Dropping EndingCropRotation, Treatment and Stover Harvest Level columns
+
+```{r}
+#Dropping EndingCropRotation, Treatment and Stover Harvest Level columns
+field_data = field_data %>% select(
+  -starts_with("Stover"), 
+  -EndingCropRotation, 
+  -Treatment, 
+  -Crop2017)
+```
+
+Renaming InitialCroppingSystem and EndingCroppingSystem columns
+
+```{r}
+#Renaming InitialCroppingSystem and EndingCroppingSystem columns
+field_data = field_data %>% 
+  rename(
+    System = InitialCroppingSystem,
+    Rotation = EndingCroppingSystem
+  )
+```
+
+Replacing NaN in LevelStoverHarvest column with None
+
+```{r}
+#Replacing NaN in LevelStoverHarvest column with None
+field_data = field_data %>%
+  replace_na(
+    list(LevelStoverHarvest = "None")
+  )
+```
+
+### Time-Bounding
+
+Now the most important piece of processing for field data, splitting
+between years. For this analysis, we want to treat every plot/year
+combination as its own data point, so we will be splitting the rows of
+field_data into multiple rows based on year.
+
+To do this we will be making a new tibble crop_data with each row being
+a unique year/plot combination. This tibble will also hold rainfall and
+temperature information, as these are relevant factors for corn yields.
+To accomplish this we will:
+
+Creating crop_data from field_data via pivot
+
+```{r}
+#Pivoting field_data into crop_data w/ pivot_longer to make GrainYear by year values
+crop_data = field_data %>% pivot_longer(
+  cols = starts_with("Grain"),
+  names_to = "Year",
+  values_to = "Yield",
+  names_prefix = "Grain"
+)
+```
+
+Dropping years w/o yield data
+
+```{r}
+#Removing years for which Yield data is missing w/ drop_na
+crop_data = crop_data %>% drop_na(Yield)
+```
+
+Adding rain and temp data to main tibble crop_data via joins
+
+```{r}
+#Making sure all Year fields are set as type double for comparison
+crop_data = crop_data %>% mutate(Year = as.double(Year))
+seasonal_rain_data = seasonal_rain_data %>% mutate(Year = as.double(Year))
+temp_data = temp_data %>% mutate(Year = as.double(Year))
+
+#Joining crop_data and seasonal_rain_data on Year
+crop_data = inner_join(crop_data, seasonal_rain_data, by = "Year")
+
+#Joining crop data and temp_data on Year
+crop_data = inner_join(crop_data, temp_data, by = "Year")
+```
+
+Setting biochar application outside 2013 to 0
+
+```{r}
+crop_data = crop_data %>% mutate(
+  Biochar = if_else(
+    Year == 2013,
+    Biochar,
+    0
+  )
+)
+```
+
+## Exploratory Analysis [Continuous]
+
+The plots that we will use for this graphing will be violin plots, as
+even for our continuous values the values are still sparse, as we only
+have unique temp/rainfall/year values for each year. Violin plots are
+useful because they allow us to see the distribution of points with the
+same x-axis value, something very difficult to see with densely packed
+data in a scatter plot.
+
+For biochar application, we will only graph continuous corn plots in
+2013 because biochar was only applied to continuous corn fields in 2013.
+We will get just the continuous corn plot data by filtering on the value
+of the Rotation column (in addition to filtering on Year).
+
+### Corn Yields over Time
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = factor(Year), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields over Time",
+    x = "Year",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+year_avgs = crop_data %>% group_by(Year) %>% summarize(Yield = mean(Yield))
+print(year_avgs)
+```
+
+### Corn Yields w/ Rainfall
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = factor(Rainfall), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Rainfall",
+    x = "Rainfall (mm)",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+rain_avgs = crop_data %>% group_by(Rainfall) %>% summarize(Yield = mean(Yield))
+print(rain_avgs)
+```
+
+### Corn Yields w/ May Average Temperature
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = factor(May.tmean.C), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ May Average Temperature",
+    x = "May Average Temperature (Celsius)",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+may_avg_avgs = crop_data %>% group_by(May.tmean.C) %>% summarize(Yield = mean(Yield))
+print(may_avg_avgs)
+```
+
+### Corn Yields w/ May Low Temperature
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = factor(May.tmin.C), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ May Low Temperature",
+    x = "May Low Temperature (Celsius)",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+may_low_avgs = crop_data %>% group_by(May.tmin.C) %>% summarize(Yield = mean(Yield))
+print(may_low_avgs)
+```
+
+### Corn Yields w/ May High Temperature
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = factor(May.tmax.C), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ May High Temperature",
+    x = "May High Temperature (Celsius)",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+may_high_avgs = crop_data %>% group_by(May.tmax.C) %>% summarize(Yield = mean(Yield))
+print(may_high_avgs)
+```
+
+### Corn Yields w/ Biochar Application
+
+Limited to year 2013 and continuous corn plots, the only plots biochar
+was applied to
+
+```{r}
+#Violin Plot
+ggplot(data=filter(crop_data, Year==2013, Rotation=="Continuous Corn"), aes(x = factor(Biochar), y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Biochar Application",
+    x = "Biochar (Tons per Acre)",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+biochar_avgs = filter(crop_data, Year==2013, Rotation=="Continuous Corn") %>% group_by(Biochar) %>% summarize(Yield = mean(Yield))
+print(biochar_avgs)
+```
+
+Looking at our graphs for yields plotted against continuous values, we
+see a bit of an upward trend in yields with rainfall, as one would
+expect, but otherwise see little clear relationship with temperature,
+presumably owing to the relatively low size of the temperature sample
+size, and to that no particularly cold season starts were recorded, the
+main factor that could cause temperature to become a significant factor
+for corn growth. For biochar, we see little difference in yield with
+greater biochar application, likely because fertilizer is applied to the
+fields as needed regardless of biochar application, although
+unfortunately data on fertilizer application is not available for the
+study we are working with.
+
+The lack of yield trend over time is in-line with the study we are
+working with, which treated each plot similarly over the course of the
+study.
+
+## Exploratory Analysis [Categorical]
+
+We will now be looking at the effect of categorical values on yields,
+again using violin plots. The categorical values of interest for us are
+tilling method, crop rotation, growing system and stover harvest level,
+which we will use as the x-values for our plots, using the categorical
+column as the x-axis and yield on the y-axis.
+
+### Corn Yields w/ Tilling Method
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = Tillage, y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Tilling Method",
+    x = "Tilling Method",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+till_avgs = crop_data %>% group_by(Tillage) %>% summarize(Yield = mean(Yield))
+print(till_avgs)
+```
+
+### Corn Yields w/ Crop Rotation
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = Rotation, y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Crop Rotation",
+    x = "Crop Rotation",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+rotation_avgs = crop_data %>% group_by(Rotation) %>% summarize(Yield = mean(Yield))
+print(rotation_avgs)
+```
+
+### Corn Yields w/ Growing System
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = System, y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Growing System",
+    x = "Growing System",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+system_avgs = crop_data %>% group_by(System) %>% summarize(Yield = mean(Yield))
+print(system_avgs)
+```
+
+### Corn Yields w/ Stover Harvest Level
+
+```{r}
+#Violin Plot
+ggplot(data=crop_data, aes(x = LevelStoverHarvest, y = Yield)) +
+  geom_violin() + 
+  labs(
+    title = "Corn Yields w/ Stover Harvest Level",
+    x = "Stover Harvest Level",
+    y = "Corn Yields (Bushels per Acre)"
+  )
+```
+
+```{r}
+#Summary Statistic Tibble
+stover_avgs = crop_data %>% group_by(LevelStoverHarvest) %>% summarize(Yield = mean(Yield))
+print(stover_avgs)
+```
+
+Looking at our graphs for categorical values, we see little difference
+in yield distributions for different practices. This lack of a trend
+would be within itself informative, and we will now move onto building a
+model to determine more definitively if the trends we have seen in our
+exploratory analysis will hold true.
+
+## Modelling
+
+For this analysis, we will be building a multiple linear regression
+model to predict corn yields given information on the climatic
+conditions and the growing practices used.
+
+### Choosing Inputs
+
+Our first step will be to identify what input values we want to use. So
+far we have analyzed the relationship of corn yields to mean
+temperature, low temperature, high temperature, seasonal rainfall,
+biochar application, tilling method, crop rotation, growing method and
+stover harvest level.
+
+For this model we will be eliminating biochar from consideration as a
+variable, as it having only been applied to continuous corn plots in
+2013 means the sample size for its application is much lower (making
+getting good results harder), and our exploratory analysis indicated
+that it had little effect on yields when it was applied.
+
+We will also be using only mean temperature, as the temperature plots we
+created in our exploratory analysis showed little difference in
+distribution of yields between low, mean and high May temperatures.
+Considering that temperature’s effect is not of particular interest to
+us given that it is not a component of farm management but rather just
+an environmental factor, we will be using just mean temperature to
+represent temperature to simplify its implementation in our model. This
+will hopefully allow us to gather more meaning on the effect of
+cultivation practices on corn yields, our goal for this project.
+
+This leaves us with an input factor set of mean temperature, seasonal
+rainfall, tilling method, crop rotation, growing method and stover
+harvest level.
+
+### Encoding Categorical Values as Factors
+
+To do regression we need R to treat our categorical variables as
+categories rather than numbers. Converting them to factors lets lm()
+automatically dummy-code them (one 0/1 indicator per non-reference
+level), so the model estimates a separate effect for each practice
+relative to a baseline, without assuming the levels are ordered or
+evenly spaced.
+
+The first level listed for each factor is the baseline the other levels
+are compared against, chosen here as the conventional practice:
+
+```{r}
+#Converting categorical columns to factors for regression
+#Doing so in a copy of crop_data to preserve base data
+#Also removing fields not used in model 
+#(PlotNo, Field, Block, Biochar, Low Temp, High Temp)
+model_data = crop_data %>% mutate(
+  Tillage = factor(Tillage, levels = c("Chisel", "No-till")),
+  LevelStoverHarvest = factor(LevelStoverHarvest, levels = c("None", "Moderate", "High")),
+  System = factor(System, levels = c("Continuous", "Twin", "Cover")),
+  Rotation = factor(Rotation, levels = c("Continuous Corn", "Corn-Alfalfa", "Cover Crop"))
+) %>%
+  select(-PlotNo, -Field, -Block, -Biochar, -May.tmin.C, -May.tmax.C)
+```
+
+### Leave-One-Year-Out Modeling
+
+For each selected year from 2008 through 2020, that entire year is held
+out for evaluation, and the models are trained on all other available
+years in the dataset (rather than only on earlier years). The RMSE and
+R-squared are reported separately for each held-out year.
+
+```{r}
+# Selected evaluation years
+selected_years = 2008:2020
+
+# Evaluate the full model year by year, leaving the test year out of training
+full_model_results = map_dfr(selected_years, function(test_year) {
+  train_data = model_data %>% filter(Year != test_year)
+  test_data = model_data %>% filter(Year == test_year)
+
+  yield_model = lm(Yield ~
+    LevelStoverHarvest +
+    Tillage +
+    System +
+    Rotation +
+    Rainfall +
+    May.tmean.C,
+    data = train_data)
+
+  predictions = predict(yield_model, newdata = test_data)
+  tibble(
+    Year = test_year,
+    RMSE = sqrt(mean((test_data$Yield - predictions)^2)),
+    R2 = 1 - sum((test_data$Yield - predictions)^2) /
+      sum((test_data$Yield - mean(test_data$Yield))^2)
+  )
+})
+
+# Report metrics separately for each evaluation year
+full_model_results
+full_model_results %>% summarise(avg_RMSE = mean(RMSE), avg_R2 = mean(R2))
+```
+
+## Practices Only Model
+
+Similar to the full model, but omits rainfall and temperature as inputs.
+Each selected year is evaluated using a model trained on all other
+available years, excluding the held-out year.
+
+```{r}
+# Evaluate the practices-only model year by year, leaving the test year out of training
+practice_model_results = map_dfr(selected_years, function(test_year) {
+  train_data = model_data %>% filter(Year != test_year)
+  test_data = model_data %>% filter(Year == test_year)
+
+  practice_model = lm(Yield ~
+    LevelStoverHarvest +
+    Tillage +
+    System +
+    Rotation,
+    data = train_data)
+
+  predictions = predict(practice_model, newdata = test_data)
+  tibble(
+    Year = test_year,
+    RMSE = sqrt(mean((test_data$Yield - predictions)^2)),
+    R2 = 1 - sum((test_data$Yield - predictions)^2) /
+      sum((test_data$Yield - mean(test_data$Yield))^2)
+  )
+})
+
+# Report metrics separately for each evaluation year
+practice_model_results
+practice_model_results %>% summarise(avg_RMSE = mean(RMSE), avg_R2 = mean(R2))
+```
+
+Neither model appears to hold much predictive power at all, generally
+landing negative on R-squared values except for in select years, where
+even the highest values still remain notably low. This at the very least
+indicates that these features lack strong predictive power for
+predicting yields. And from that, it can reasonably be stated, that they
+lack any strong *negative* impact on yields, as that would have yielded
+models with literally any predictive power.
