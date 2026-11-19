@@ -1,4 +1,4 @@
-# A Data-Driven Management Aid for Small Farms
+# Building a Management Aid for Small Farms
 
 **A step-by-step Python tutorial that turns a farm's routine records into a low-cost corn yield estimator.**
 Built as a Jupyter notebook, using Nebraska field-trial data.
