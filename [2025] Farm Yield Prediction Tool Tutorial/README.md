@@ -55,8 +55,6 @@ To use your own farm's data, save it in the same table layout and update the fil
 ## Limitations
 
 - **Limited scope:** three years of experimental plots from Nebraska research sites, with high-yield, largely irrigated management. Results may not carry over to other regions, soils, or typical farm conditions without retraining on local data.
-- **Possible optimistic score:** the train–test split is random across rows, so plots from the same site-year can appear in both sets. A split by site or year would give a stricter estimate of how the model handles an unseen field or season.
-- **Demo isn't a true holdout:** the example plan is drawn from the full dataset, so the model may have already seen that row.
 - **Not weather-proof:** drought, heat waves, and pests aren't available at planning time and aren't modeled. Temperature enters as projected GDD.
 - **Associations, not causes:** coefficients describe patterns in this dataset (and several, such as hybrid and site, overlap), so they shouldn't be read as guaranteed effects of changing a single input.
 - **Intended use:** a lightweight check that a growing plan lands in a reasonable yield range, meant to complement a grower's experience rather than replace it.
